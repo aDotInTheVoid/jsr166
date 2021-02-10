@@ -1,0 +1,1562 @@
+<project name="jsr166" default="usage"
+  xmlns:if="ant:if" 
+  xmlns:unless="ant:unless"
+  xmlns:ivy="antlib:org.apache.ivy.ant">
+
+  <description>
+------------------------------------------------------------------------------
+  Build file for JSR-166
+
+  Usage: ant [target]
+
+  See http://gee.cs.oswego.edu/dl/concurrency-interest/index.html for
+  more details.
+
+  User-specific settings are read from user.properties.
+  See user.properties.sample for an explanation of some useful settings.
+
+  The repository contains all dependencies except for ant and the JDK
+  itself.  Because the JDK version matters and because different
+  targets require different JDKs, we assume that users have created a
+  hierarchy containing:
+  $HOME/jdk/jdk8
+  $HOME/jdk/jdk9
+  $HOME/jdk/jdk10
+  $HOME/jdk/jdk11
+  where each of the above is a JDK or a symlink to same, and
+  $HOME/jdk/src/jdk8
+  $HOME/jdk/src/jdk9
+  $HOME/jdk/src/jdk10
+  $HOME/jdk/src/jdk11
+  where each of the above is a complete JDK source tree
+  (e.g. mercurial forest) or a symlink to same.
+
+  Alternatively, define ant variables thus:
+  ant -Djdk$N.home=... -Djdk$N.src.home=...
+  for $N in 8 9 10 ...
+
+  As of 2016-03, the sources in src/main are for jdk9+ only.
+------------------------------------------------------------------------------
+  </description>
+
+  <!-- Run 'ant -projecthelp' (default target) -->
+  <target name="usage">
+    <java classname="org.apache.tools.ant.Main">
+      <arg value="-projecthelp" />
+    </java>
+  </target>
+
+  <!-- HOWTO printf debug: <echo message="prop=${prop}"/> -->
+
+  <!-- User-specific settings -->
+  <property file="user.properties"/>
+
+
+  <!-- Compilation options -->
+  <property name="build.sourcelevel"    value="6"/>
+  <property name="build.debug"          value="true"/>
+  <property name="build.debuglevel"     value="source,lines,vars"/>
+  <property name="build.deprecation"    value="false"/>
+  <property name="build.javadoc.access" value="protected"/>
+
+  <!-- Build locations -->
+  <property name="build.dir"                   location="build"/>
+  <property name="build.classes.dir"           location="${build.dir}/classes"/>
+  <property name="build.testcases.dir"         location="${build.dir}/testcases"/>
+  <property name="build.loops.dir"             location="${build.dir}/loops"/>
+
+  <property name="build.4jdk7.dir"             location="${build.dir}/jsr166-4jdk7"/>
+  <property name="build.4jdk7.classes.dir"     location="${build.4jdk7.dir}/classes"/>
+  <property name="build.4jdk7.tck.classes.dir" location="${build.4jdk7.dir}/tck-classes"/>
+  <property name="build.4jdk7.docs.dir"        location="${build.4jdk7.dir}/docs"/>
+
+  <property name="build.4jdk8.dir"             location="${build.dir}/jsr166-4jdk8"/>
+  <property name="build.4jdk8.classes.dir"     location="${build.4jdk8.dir}/classes"/>
+  <property name="build.4jdk8.tck.classes.dir" location="${build.4jdk8.dir}/tck-classes"/>
+  <property name="build.4jdk8.docs.dir"        location="${build.4jdk8.dir}/docs"/>
+
+  <property name="build.jsr166x.dir"           location="${build.dir}/jsr166x"/>
+  <property name="build.jsr166y.dir"           location="${build.dir}/jsr166y"/>
+  <property name="build.jsr166e.dir"           location="${build.dir}/jsr166e"/>
+  <property name="build.extra166y.dir"         location="${build.dir}/extra166y"/>
+
+  <property name="build.jsr166x.classes.dir"   location="${build.jsr166x.dir}/classes"/>
+  <property name="build.jsr166y.classes.dir"   location="${build.jsr166y.dir}/classes"/>
+  <property name="build.jsr166e.classes.dir"   location="${build.jsr166e.dir}/classes"/>
+  <property name="build.extra166y.classes.dir" location="${build.extra166y.dir}/classes"/>
+
+  <!-- JDK locations -->
+  <property name="jdks.home"  location="${user.home}/jdk"/>
+
+  <macrodef name="defjdklocations">
+    <attribute name="v"/>
+    <sequential>
+    <property name="jdk@{v}.home"     location="${jdks.home}/jdk@{v}"/>
+    <property name="java@{v}"         location="${jdk@{v}.home}/bin/java"/>
+    <property name="javac@{v}"        location="${jdk@{v}.home}/bin/javac"/>
+    <property name="javadoc@{v}"      location="${jdk@{v}.home}/bin/javadoc"/>
+    <property name="jdk@{v}.src.home" location="${jdks.home}/src/jdk@{v}"/>
+    <local name="have.java.base"/>
+    <available property="have.java.base"
+      file="${jdk@{v}.src.home}/jdk/src/java.base/share/classes" type="dir"/>
+    <property name="jdk@{v}.src.dir" location="${jdk@{v}.src.home}/jdk/src/java.base/share/classes"
+      if:set="have.java.base"/>
+    <property name="jdk@{v}.src.dir" location="${jdk@{v}.src.home}/jdk/src/share/classes"
+      unless:set="have.java.base"/>
+    <local name="modules"/>
+    <available property="modules" file="${jdk@{v}.home}/jmods" type="dir"/>
+    <local name="boot.jar.dir"/>
+    <property name="boot.jar.dir"   location="${jdk@{v}.home}/jre/lib" unless:set="modules"/>
+    <path id="bootclasspath@{v}" unless:set="modules">
+      <pathelement path="${boot.jar.dir}/resources.jar"/>
+      <pathelement path="${boot.jar.dir}/rt.jar"/>
+      <pathelement path="${boot.jar.dir}/jsse.jar"/>
+      <pathelement path="${boot.jar.dir}/jce.jar"/>
+      <pathelement path="${boot.jar.dir}/charsets.jar"/>
+    </path>
+    <property name="bootclasspath@{v}" value="${toString:bootclasspath@{v}}" unless:set="modules"/>
+    </sequential>
+  </macrodef>
+
+  <macrodef name="mirror-dir">
+    <attribute name="src"/>
+    <attribute name="dst"/>
+    <sequential>
+    <delete dir="@{dst}"/>
+    <mkdir dir="@{dst}"/>
+    <copy todir="@{dst}" preservelastmodified="true">
+      <fileset dir="@{src}"/>
+    </copy>
+    </sequential>
+  </macrodef>
+
+  <defjdklocations v="6"/>
+  <defjdklocations v="7"/>
+  <defjdklocations v="8"/>
+  <defjdklocations v="9"/>
+  <defjdklocations v="10"/>
+  <defjdklocations v="11"/>
+
+  <!-- Source locations -->
+  <property name="src.dir"              location="${basedir}/src/main"/>
+  <property name="test.src.dir"         location="${basedir}/src/test"/>
+  <property name="loops.src.dir"        location="${basedir}/src/loops"/>
+  <property name="tck.src.dir"          location="${test.src.dir}/tck"/>
+  <property name="jtreg7.src.dir"       location="${test.src.dir}/jtreg-jdk7"/>
+  <property name="jtreg8.src.dir"       location="${test.src.dir}/jtreg-jdk8"/>
+  <property name="jtreg9.src.dir"       location="${test.src.dir}/jtreg"/>
+  <property name="jtreg10.src.dir"      location="${test.src.dir}/jtreg"/>
+  <property name="jtreg11.src.dir"      location="${test.src.dir}/jtreg"/>
+  <property name="jtreg.src.dir"        location="${jtreg9.src.dir}"/>
+  <property name="lib.dir"              location="${basedir}/lib"/>
+  <property name="dist.dir"             location="${basedir}/dist"/>
+  <property name="topsrc.dir"           location="${basedir}/src"/>
+  <property name="4jdk7src.dir"         location="${topsrc.dir}/jdk7"/>
+  <property name="4jdk8src.dir"         location="${topsrc.dir}/jdk8"/>
+  <property name="jsr166xsrc.dir"       location="${topsrc.dir}/jsr166x"/>
+  <property name="jsr166ysrc.dir"       location="${topsrc.dir}/jsr166y"/>
+  <property name="jsr166esrc.dir"       location="${topsrc.dir}/jsr166e"/>
+  <property name="extra166ysrc.dir"     location="${topsrc.dir}/extra166y"/>
+
+  <!-- Javadoc locations -->
+  <property name="docs.dir"          location="${build.dir}/docs"/>
+  <property name="4jdk7docs.dir"     location="${build.4jdk7.dir}/docs"/>
+  <property name="4jdk8docs.dir"     location="${build.4jdk8.dir}/docs"/>
+  <property name="jsr166xdocs.dir"   location="${build.jsr166x.dir}/docs"/>
+  <property name="jsr166ydocs.dir"   location="${build.jsr166y.dir}/docs"/>
+  <property name="jsr166edocs.dir"   location="${build.jsr166e.dir}/docs"/>
+  <property name="extra166ydocs.dir" location="${build.extra166y.dir}/docs"/>
+
+  <property name="dist.docs.dir"          location="${dist.dir}/docs"/>
+  <property name="dist.4jdk7docs.dir"     location="${dist.dir}/jsr166-4jdk7docs"/>
+  <property name="dist.4jdk8docs.dir"     location="${dist.dir}/jsr166-4jdk8docs"/>
+  <property name="dist.jsr166xdocs.dir"   location="${dist.dir}/jsr166xdocs"/>
+  <property name="dist.jsr166ydocs.dir"   location="${dist.dir}/jsr166ydocs"/>
+  <property name="dist.jsr166edocs.dir"   location="${dist.dir}/jsr166edocs"/>
+  <property name="dist.extra166ydocs.dir" location="${dist.dir}/extra166ydocs"/>
+
+  <!-- Jar locations -->
+  <property name="product.jar"      location="${build.dir}/jsr166.jar"/>
+  <property name="4jdk7product.jar" location="${build.4jdk7.dir}/jsr166-4jdk7.jar"/>
+  <property name="4jdk8product.jar" location="${build.4jdk8.dir}/jsr166-4jdk8.jar"/>
+  <property name="jsr166x.jar"      location="${build.jsr166x.dir}/jsr166x.jar"/>
+  <property name="jsr166y.jar"      location="${build.jsr166y.dir}/jsr166y.jar"/>
+  <property name="jsr166e.jar"      location="${build.jsr166e.dir}/jsr166e.jar"/>
+  <property name="extra166y.jar"    location="${build.extra166y.dir}/extra166y.jar"/>
+  <property name="junit.jar"        location="${lib.dir}/junit.jar"/>
+
+  <!-- Canonical location of jdk docs root, to use with javadoc -Xdocrootparent flag -->
+  <!-- Switched to https: in 2017-10 - JDK-8190312 -->
+  <property name="java5.docroot.url"  value="https://docs.oracle.com/javase/1.5.0/docs"/>
+  <property name="java6.docroot.url"  value="https://docs.oracle.com/javase/6/docs"/>
+  <property name="java7.docroot.url"  value="https://docs.oracle.com/javase/7/docs"/>
+  <property name="java8.docroot.url"  value="https://docs.oracle.com/javase/8/docs"/>
+  <property name="java9.docroot.url"  value="https://docs.oracle.com/javase/9/docs"/>
+  <property name="java10.docroot.url" value="https://docs.oracle.com/javase/10/docs"/>
+  <!-- The location of jdk early access docs (RIP) -->
+  <!-- <property name="java9.docroot.url" value="http://download.java.net/java/jdk9/docs"/> -->
+  <!-- <property name="java10.docroot.url" value="http://download.java.net/java/jdk10/docs"/> -->
+  <property name="java11.docroot.url" value="http://download.java.net/java/jdk11/docs"/>
+  <!-- Default jdk doc location (latest stable release seems best) -->
+  <property name="java.docroot.url"   value="${java10.docroot.url}"/>
+
+  <!-- Canonical location of jdk API docs, to use with javadoc link attribute -->
+  <property name="java5.api.url"      value="${java5.docroot.url}/api/"/>
+  <property name="java6.api.url"      value="${java6.docroot.url}/api/"/>
+  <property name="java7.api.url"      value="${java7.docroot.url}/api/"/>
+  <property name="java8.api.url"      value="${java8.docroot.url}/api/"/>
+  <property name="java9.api.url"      value="${java9.docroot.url}/api/"/>
+  <property name="java10.api.url"     value="${java10.docroot.url}/api/"/>
+  <property name="java11.api.url"     value="${java11.docroot.url}/api/"/>
+  <property name="java.api.url"       value="${java.docroot.url}/api/"/>
+
+  <!-- Define the "jtreg" task -->
+  <!-- See the docs in "jtreg -onlineHelp" -->
+  <taskdef name="jtreg" classname="com.sun.javatest.regtest.Main$$Ant"
+           classpath="${lib.dir}/jtreg.jar" />
+
+  <!-- Tck options; see JSR166TestCase.java
+   To profile a single tck test class:
+   ant -Djsr166.profileTests=true -Djsr166.profileThreshold=10 -Djsr166.tckTestClass=CompletableFutureTest tck
+   To stress test a single tck test class:
+   ant -Djsr166.tckTestClass=CountedCompleterTest -Djsr166.runsPerTest=100 tck
+   To stress test a single tck test method:
+   ant -Djsr166.tckTestClass=RecursiveTaskTest -Djsr166.runsPerTest=1000 -Djsr166.methodFilter=testAbnormalInvokeAll3 tck
+  -->
+  <property name="jsr166.tckTestClass"     value="JSR166TestCase"/>
+  <macrodef name="run-tck-tests">
+    <attribute name="tck.src.dir" default="${tck.src.dir}"/>
+    <attribute name="target"/>
+    <attribute name="compile-target" default="@{target}"/>
+    <attribute name="workdir"/>
+    <attribute name="classes"/>
+    <!--
+        <attribute name="jvmflags" default="-XX:+UseParallelGC -XX:-UseBiasedLocking -ea -esa -Djsr166.testImplementationDetails=true"/>
+    -->
+        <attribute name="jvmflags" default="-ea -esa -Djsr166.testImplementationDetails=true"/>
+    <element name="javac-elements" optional="true"/>
+
+    <sequential>
+
+    <local name="modules"/>
+    <condition property="modules">
+      <available file="${jdk@{compile-target}.home}/jmods" type="dir"/>
+    </condition>
+
+    <local name="use-doclint"/>
+    <condition property="use-doclint">
+      <not> <equals arg1="@{target}" arg2="7"/> </not>
+    </condition>
+
+    <mkdir dir="@{workdir}/tck-classes"/>
+
+    <javac srcdir="@{tck.src.dir}"
+           destdir="@{workdir}/tck-classes"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="@{compile-target}"
+           target="@{compile-target}"
+           classpath="${junit.jar}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac@{compile-target}}"
+           fork="true">
+
+      <include name="*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all,-unchecked,-rawtypes,-serial,-deprecation,-try"/>
+      <compilerarg value="-Xdoclint:reference/private" if:set="use-doclint"/>
+      <compilerarg value="-Xbootclasspath/p:@{classes}" unless:set="modules"/>
+      <compilerarg value="--patch-module=java.base=@{classes}" if:set="modules"/>
+      <compilerarg line="${build.args}"/>
+      <javac-elements/>
+
+    </javac>
+
+    <java classname="${jsr166.tckTestClass}"
+          failonerror="true"
+          jvm="${java@{target}}"
+          fork="true">
+	<jvmarg value="-Xbootclasspath/p:@{classes}" unless:set="modules"/>
+	<jvmarg value="--patch-module=java.base=@{classes}" if:set="modules"/>
+	<jvmarg value="--add-opens=java.base/java.lang=ALL-UNNAMED" if:set="modules"/>
+	<jvmarg value="--add-opens=java.base/java.util=ALL-UNNAMED" if:set="modules"/>
+	<jvmarg value="--add-opens=java.base/java.util.concurrent=ALL-UNNAMED" if:set="modules"/>
+	<jvmarg value="--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED" if:set="modules"/>
+	<jvmarg value="--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED" if:set="modules"/>
+	<jvmarg line="@{jvmflags}"/>
+	<!-- ant -Dvmoptions="-Xmx8m" -Djsr166.tckTestClass=CompletableFutureTest tck -->
+	<jvmarg line="${vmoptions}" if:set="vmoptions"/>
+
+	<!-- ant -Djava.util.concurrent.ForkJoinPool.common.parallelism=1 tck -->
+	<syspropertyset id="system-properties-used-by-tck">
+	  <propertyref prefix="java.util.concurrent.ForkJoinPool"/>
+	  <propertyref prefix="jsr166."/>
+	  <propertyref name="test.timeout.factor"/>
+	</syspropertyset>
+
+	<classpath>
+	  <pathelement location="${junit.jar}"/>
+	  <pathelement location="@{workdir}/tck-classes"/>
+	</classpath>
+    </java>
+
+    </sequential>
+  </macrodef>
+
+  <!-- Define jtreg test sets for different jdk versions -->
+  <!-- ant -Djtreg.test.pattern="**/ConcurrentHashMap/" -->
+  <!-- ant -Djtreg.test.pattern="**/ToArray.java" -->
+  <property name="jtreg.test.pattern" value="**/*.java"/>
+  <macrodef name="defjtregtests">
+    <attribute name="v"/>
+    <sequential>
+      <fileset dir="${jtreg@{v}.src.dir}">
+        <patternset id="jdk@{v}.jtreg.tests">
+          <include name="${jtreg.test.pattern}"/>
+        </patternset>
+      </fileset>
+    </sequential>
+  </macrodef>
+
+  <defjtregtests v="11"/>
+  <defjtregtests v="10"/>
+  <defjtregtests v="9"/>
+  <defjtregtests v="8"/>
+  <defjtregtests v="7"/>
+
+  <!-- ant -Djtreg.flags=-timeoutFactor:4 -->
+  <property name="jtreg.flags" value=""/>
+
+  <macrodef name="run-jtreg-tests">
+    <!-- ant -Djtreg9.src.dir=src/test/jtreg/util/concurrent/CompletableFuture jtreg -->
+    <attribute name="target"/>
+    <attribute name="workdir"/>
+    <attribute name="classes"/>
+    <attribute name="verbose" default="${jtreg.verbose}"/>
+    <attribute name="jtregflags" default=""/>
+    <element name="jtreg-elements" optional="true"/>
+
+    <sequential>
+
+    <!-- ant -Djtreg.verbose=time,fail,error jtreg -->
+    <property name="jtreg.verbose" value="nopass,fail,error"/>
+
+    <local name="modules"/>
+    <condition property="modules">
+      <available file="${jdk@{target}.home}/jmods" type="dir"/>
+    </condition>
+
+    <delete dir="@{workdir}/JTwork"   quiet="true"/>
+    <jtreg dir="${jtreg@{target}.src.dir}"
+           jdk="${jdk@{target}.home}"
+           workDir="@{workdir}/JTwork">
+      <patternset refid="jdk@{target}.jtreg.tests"/>
+      <arg value="-Xbootclasspath/p:@{classes}" unless:set="modules"/>
+      <arg value="-javacoptions:--patch-module=java.base=@{classes}" if:set="modules"/>
+      <arg value="-vmoptions:--patch-module=java.base=@{classes}" if:set="modules"/>
+      <arg value="-agentvm"/>
+      <arg value="-noreport"/>
+      <arg value="-verbose:@{verbose}"/>
+      <arg value="-vmoptions:-esa -ea"/>
+      <arg value="-automatic"/>
+      <arg value="-k:!ignore"/>
+      <arg line="@{jtregflags}"/>
+      <arg line="${jtreg.flags}"/>
+      <jtreg-elements/>
+    </jtreg>
+    </sequential>
+  </macrodef>
+
+  <!-- ALoops classpath -->
+  <path id="loops.classpath">
+    <pathelement location="${build.loops.dir}"/>
+  </path>
+
+  <!-- Support @jls tag, used in jdk8+ javadoc -->
+  <property name="javadoc.jls.cite" value="The Java&amp;trade; Language Specification"/>
+  <property name="javadoc.jls.option" value="jls:a:See &lt;cite&gt;${javadoc.jls.cite}&lt;/cite&gt;:"/>
+
+  <!-- Main targets -->
+
+  <property name="build.main.java.version" value="9"/>
+  <!-- Workaround "no nested properties in ant" -->
+  <macrodef name="define-build-main-properties">
+    <attribute name="v"/>
+    <sequential>
+      <property name="build.main.java"    value="${java@{v}}"/>
+      <property name="build.main.javac"   value="${javac@{v}}"/>
+      <!-- Force javadoc version to be at least 10, 
+           so we can use override-methods=summary -->
+      <condition property="build.main.javadoc" 
+                 value="${javadoc11}"
+                 else="${javadoc@{v}}">
+        <equals arg1="@{v}" arg2="9"/>
+      </condition>
+    </sequential>
+  </macrodef>
+  <define-build-main-properties v="${build.main.java.version}"/>
+
+  <target name="dists"
+          depends="dist, 4jdk8dist"
+          description="Builds all public jars and docs"/>
+          <!--
+              depends="dist, 4jdk8dist, 4jdk7dist, jsr166edist, jsr166ydist, extra166ydist, jsr166xdist"
+          -->
+
+  <target name="compile"
+          depends="configure-compiler"
+          description="Compiles src/main sources to build dir">
+
+    <local name="destdir"/>
+    <property name="destdir" value="${build.classes.dir}/java.base"/>
+
+    <mkdir dir="${destdir}"/>
+
+    <javac srcdir="${src.dir}"
+           destdir="${destdir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           classpath=""
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${build.main.javac}"
+           fork="true">
+
+      <include name="**/*.java"/>
+      <compilerarg value="--patch-module=java.base=${src.dir}"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg line="--doclint-format html5"/>
+      <compilerarg value="-Xdoclint:all/protected,reference/private"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="-Xmaxerrs 1000 -Xmaxwarns 1000"/>
+      <compilerarg line="${build.args}"/>
+
+    </javac>
+  </target>
+
+
+  <target name="jar"
+          depends="compile"
+          description="Builds library jar for src/main from compiled sources">
+    <local name="subdir"/>
+    <available property="subdir" file="${build.classes.dir}/java.base" type="dir" value="/java.base"/>
+    <jar destfile="${product.jar}">
+      <fileset dir="${build.classes.dir}${subdir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+
+  <target name="docs"
+          description="Builds javadocs for src/main to dist dir">
+
+    <delete dir="${docs.dir}"/>
+    <mkdir dir="${docs.dir}"/>
+
+    <!-- the packagenames="none" hack below prevents scanning the -->
+    <!-- sourcepath for packages -->
+
+<!-- TODO: sourcepath="${src.dir}:${jdk9.src.dir}" -->
+<!-- TODO: sourcepath="${src.dir}:${jdk9.src.dir}:${jdk9.src.home}/jdk/src/java.logging/share/classes" -->
+<!-- TODO: sourcepath="${src.dir}:${jdk9.home}/src.zip" -->
+<!-- TODO: <arg line="-sourcepath ${src.dir}:${jdk9.home}/src.zip"/> -->
+<!-- TODO: <arg line="- -module-source-path ${jdk9.home}/src.zip"/> -->
+    <javadoc destdir="${docs.dir}"
+             packagenames="none"
+             link="${java9.api.url}"
+             overview="${src.dir}/intro.html"
+             access="${build.javadoc.access}"
+             sourcepath="${src.dir}"
+             classpath=""
+             source="9"
+             executable="${build.main.javadoc}">
+      <fileset dir="${src.dir}" defaultexcludes="yes">
+        <include name="**/*.java"/>
+      </fileset>
+      <arg line="-Xdocrootparent ${java9.docroot.url}"/>
+      <arg line="-Xmaxerrs 1000 -Xmaxwarns 1000"/>
+      <arg value="-XDignore.symbol.file=true"/>
+      <arg value="-html5"/>
+      <arg value="--patch-module=java.base=${src.dir}"/>
+      <arg value="--override-methods=summary"/>
+      <arg value="-tag"/> <arg value="${javadoc.jls.option}"/>
+      <arg value="-tag"/> <arg value="implSpec:a:Implementation Requirements:"/>
+      <arg value="-tag"/> <arg value="implNote:a:Implementation Note:"/>
+<!-- @apiNote tag currently unused -->
+<!--  <arg value="-tag"/> <arg value="apiNote:a:API Note:"/> -->
+<!-- tags added in jdk9: currently unused -->
+<!--  <arg value="-tag"/> <arg value="revised:X"/> -->
+<!--  <arg value="-tag"/> <arg value="spec:X"/> -->
+    </javadoc>
+  </target>
+
+
+  <target name="dist"
+          depends="dist-clean, dist-jar, dist-docs"
+          description="Puts all distributable products in single hierarchy"/>
+
+
+  <target name="release"
+          depends="dist"
+          description="Puts entire CVS tree, plus distribution productions, in a jar">
+
+    <property name="release.jar" value="dist/jsr166-${version}-dist.jar"/>
+
+    <jar basedir="${basedir}" destfile="${release.jar}">
+      <!-- <exclude name="build/**"/> -->
+      <exclude name="${release.jar}"/>
+      <exclude name="user.properties"/>
+      <exclude name="etc/notes/**"/>
+      <exclude name="src/emulation/**"/>
+      <exclude name="**/SyntaxTest.java"/>
+      <exclude name="**/SuperfluousAbstract.java"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+
+  <target name="clean"
+          description="Removes all build products">
+    <delete dir="${build.dir}"/>
+  </target>
+
+
+  <target name="dist-clean"
+          description="Removes all build and distribution products">
+    <delete dir="${build.dir}"/>
+    <delete dir="${dist.dir}"/>
+  </target>
+
+
+  <target name="dist-jar"
+          depends="clean, jar">
+    <copy file="${product.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="dist-docs"
+          depends="clean, docs">
+    <mirror-dir src="${docs.dir}" dst="${dist.docs.dir}"/>
+  </target>
+
+  <target name="tck"
+	  depends="jar"
+          description="Runs tck tests for src/main directly">
+
+    <run-tck-tests
+      target="${build.main.java.version}"
+      workdir="${build.dir}"
+      classes="${product.jar}">
+      <javac-elements>
+        <compilerarg value="-Werror"/>
+      </javac-elements>
+    </run-tck-tests>
+  </target>
+
+  <target name="tck-parallelism-1"
+          description="Runs tck with common pool parallelism 1">
+    <antcall target="tck">
+      <param name="java.util.concurrent.ForkJoinPool.common.parallelism" value="1"/>
+    </antcall>
+  </target>
+
+  <target name="tck-parallelism-0"
+          description="Runs tck with common pool parallelism 0">
+    <antcall target="tck">
+      <param name="java.util.concurrent.ForkJoinPool.common.parallelism" value="0"/>
+    </antcall>
+  </target>
+
+  <target name="tck-security-manager"
+          description="Runs tck with a security manager">
+    <antcall target="tck">
+      <param name="jsr166.useSecurityManager" value="true"/>
+    </antcall>
+  </target>
+
+  <target name="jtreg"
+	  depends="jar"
+          description="Runs jtreg tests for src/main using the jtreg ant task">
+    <run-jtreg-tests
+       target="${build.main.java.version}"
+       workdir="${build.dir}"
+       classes="${product.jar}"/>
+  </target>
+
+  <target name="test"
+          depends="tck, tck-parallelism-1, tck-parallelism-0, jtreg"
+          description="Runs tck and jtreg tests for src/main"/>
+
+<!--   <target name="jtreg8" description="Runs jtreg tests with jdk8"> -->
+
+<!--     <antcall target="jtreg"> -->
+<!--       <param name="build.main.java.version" value="8"/> -->
+<!--       <param name="build.main.javac" value="${javac8}"/> -->
+<!--     </antcall> -->
+
+<!--   </target> -->
+
+  <target name="test91011"
+          description="Runs tck and jtreg tests for src/main for multiple java versions">
+
+    <antcall target="clean"/>
+    <antcall target="test">
+      <param name="build.main.java.version" value="9"/>
+    </antcall>
+
+    <antcall target="clean"/>
+    <antcall target="test">
+      <param name="build.main.java.version" value="10"/>
+    </antcall>
+
+    <antcall target="clean"/>
+    <antcall target="test">
+      <param name="build.main.java.version" value="11"/>
+    </antcall>
+
+    <!-- Clean up to avoid obscure wrong class file version bugs -->
+    <antcall target="clean"/>
+
+  </target>
+
+
+
+  <target name="configure-compiler">
+    <fail message="ant version too old">
+      <condition> <not> <antversion atleast="1.9.1"/> </not> </condition>
+    </fail>
+
+    <property name="unchecked.option" value="-Xlint:unchecked"/>
+
+    <condition property="warnunchecked.arg" value="${unchecked.option}">
+      <istrue value="${build.warnunchecked}"/>
+    </condition>
+
+    <property name="warnunchecked.arg" value=""/>
+
+
+    <!-- Common options in javac invocations -->
+    <property name="build.args" value="${warnunchecked.arg}"/>
+
+  </target>
+
+
+
+  <!-- Various demos and test programs -->
+
+
+  <!-- description="Benchmark from Doug Lea's AQS paper" -->
+  <target name="loops" depends="configure-compiler">
+
+    <mkdir dir="${build.loops.dir}"/>
+
+    <javac srcdir="${loops.src.dir}"
+          destdir="${build.loops.dir}"
+            debug="${build.debug}"
+       debuglevel="${build.debuglevel}"
+      deprecation="${build.deprecation}"
+           source="${build.sourcelevel}"
+           target="${build.sourcelevel}"
+         encoding="ASCII"
+             fork="true">
+
+      <compilerarg line="${build.args}"/>
+      <classpath refid="loops.classpath"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+
+    </javac>
+
+    <java classname="ALoops" fork="true">
+      <classpath refid="loops.classpath"/>
+    </java>
+  </target>
+
+
+  <target name="compile-test-loops" depends="jar"
+          description="Compiles all the perf tests in src/test/loops">
+
+    <mkdir dir="${build.dir}/test/loops"/>
+
+    <javac srcdir="${basedir}/src/test/loops"
+           destdir="${build.dir}/test/loops"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${build.main.javac}"
+           fork="true">
+
+      <include name="*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all,-unchecked,-rawtypes,-serial"/>
+      <compilerarg value="-Xbootclasspath/p:${product.jar}"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+
+  <!-- jsr166 4jdk8 -->
+
+  <target name="4jdk8compile"
+          depends="configure-compiler"
+          description="Compiles src/jdk8 sources, targeting jdk8">
+
+    <mkdir dir="${build.4jdk8.classes.dir}"/>
+
+    <javac srcdir="${4jdk8src.dir}"
+           destdir="${build.4jdk8.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="8"
+           target="8"
+           classpath=""
+           bootclasspath="${bootclasspath8}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac8}"
+           fork="true">
+      <include name="**/*.java"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="4jdk8doclint"
+          depends="configure-compiler"
+          description="Finds doclint warnings">
+
+    <mkdir dir="${build.4jdk8.classes.dir}"/>
+
+    <javac srcdir="${4jdk8src.dir}"
+           destdir="${build.4jdk8.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="8"
+           target="8"
+           classpath=""
+           bootclasspath="${bootclasspath8}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac8}"
+           fork="true">
+      <include name="**/*.java"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Xdoclint:all/protected,reference/private"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+
+  <target name="4jdk8jar"
+          depends="4jdk8compile"
+          description="Builds library jar from compiled sources">
+
+    <jar destfile="${4jdk8product.jar}">
+      <fileset dir="${build.4jdk8.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+
+  <target name="4jdk8-tck"
+	  depends="4jdk8jar"
+          description="Runs tck tests for jsr166-4jdk8 directly">
+
+    <run-tck-tests
+      target="8"
+      workdir="${build.4jdk8.dir}"
+      classes="${4jdk8product.jar}">
+      <javac-elements>
+        <!-- JDK9+ test classes -->
+        <exclude name="*9Test.java"/>
+        <exclude name="*10Test.java"/>
+        <compilerarg value="-Werror"/>
+      </javac-elements>
+    </run-tck-tests>
+  </target>
+
+
+  <target name="4jdk8-jtreg"
+	  depends="4jdk8jar"
+          description="Runs jtreg tests for jsr166-4jdk8 using the jtreg ant task">
+    <run-jtreg-tests
+       target="8"
+       workdir="${build.4jdk8.dir}"
+       classes="${4jdk8product.jar}"/>
+  </target>
+
+
+  <target name="4jdk8-test"
+	  depends="4jdk8-tck, 4jdk8-jtreg"
+          description="Runs tck and jtreg tests for jsr166-4jdk8"/>
+
+
+  <target name="4jdk8docs"
+          description="Builds javadocs for src/jdk8 to dist dir">
+
+    <delete dir="${4jdk8docs.dir}"/>
+    <mkdir dir="${4jdk8docs.dir}"/>
+
+    <javadoc destdir="${4jdk8docs.dir}"
+             packagenames="none"
+             link="${java8.api.url}"
+             overview="${4jdk8src.dir}/intro.html"
+             access="${build.javadoc.access}"
+             sourcepath="${4jdk8src.dir}:${jdk8.src.dir}"
+             classpath=""
+             source="8"
+             executable="${javadoc8}"
+             failonerror = "true">
+      <fileset dir="${4jdk8src.dir}" defaultexcludes="yes">
+        <include name="**/*.java"/>
+      </fileset>
+      <arg line="-Xdocrootparent ${java8.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+      <arg value="-tag"/> <arg value="${javadoc.jls.option}"/>
+      <arg value="-tag"/> <arg value="implSpec:a:&lt;em&gt;Implementation Requirements:&lt;/em&gt;"/>
+      <arg value="-tag"/> <arg value="implNote:a:&lt;em&gt;Implementation Note:&lt;/em&gt;"/>
+<!-- @apiNote tag currently unused -->
+<!--  <arg value="-tag"/> <arg value="apiNote:a:&lt;em&gt;API Note:&lt;/em&gt;"/> -->
+    </javadoc>
+  </target>
+
+
+  <target name="4jdk8dist"
+          depends="4jdk8dist-jar, 4jdk8dist-docs"
+          description="Puts all distributable products in single hierarchy"/>
+
+
+  <target name="4jdk8clean"
+          description="Removes all 4jdk8 build products">
+    <delete dir="${build.4jdk8.dir}"/>
+  </target>
+
+
+  <target name="4jdk8dist-jar"
+          depends="4jdk8clean, 4jdk8jar">
+    <copy file="${4jdk8product.jar}" todir="${dist.dir}"/>
+  </target>
+
+
+  <target name="4jdk8dist-docs"
+          depends="4jdk8clean, 4jdk8docs">
+    <mirror-dir src="${4jdk8docs.dir}" dst="${dist.4jdk8docs.dir}"/>
+  </target>
+
+
+  <!-- jsr166 4jdk7 (no longer maintained) -->
+
+  <target name="4jdk7compile" depends="configure-compiler">
+    <mkdir dir="${build.4jdk7.classes.dir}"/>
+
+    <javac srcdir="${4jdk7src.dir}"
+           destdir="${build.4jdk7.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="6"
+           target="6"
+           classpath=""
+           bootclasspath="${bootclasspath6}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac7}"
+           fork="true">
+
+      <include name="**/*.java"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="4jdk7doclint" depends="configure-compiler">
+    <mkdir dir="${build.4jdk7.classes.dir}"/>
+
+    <javac srcdir="${4jdk7src.dir}"
+           destdir="${build.4jdk7.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="6"
+           target="6"
+           classpath=""
+           bootclasspath="${bootclasspath6}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac8}"
+           fork="true">
+
+      <include name="**/*.java"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Xdoclint:all/protected"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="4jdk7jar" depends="4jdk7compile">
+    <jar destfile="${4jdk7product.jar}">
+      <fileset dir="${build.4jdk7.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="4jdk7-tck" depends="4jdk7jar">
+    <run-tck-tests
+      target="7"
+      workdir="${build.4jdk7.dir}"
+      classes="${4jdk7product.jar}">
+      <javac-elements>
+        <!-- JDK8+ test classes -->
+        <exclude name="*8Test.java"/>
+        <exclude name="*9Test.java"/>
+        <exclude name="*10Test.java"/>
+        <exclude name="DoubleAccumulatorTest.java"/>
+        <exclude name="DoubleAdderTest.java"/>
+        <exclude name="LongAccumulatorTest.java"/>
+        <exclude name="LongAdderTest.java"/>
+        <exclude name="CompletableFutureTest.java"/>
+        <exclude name="SplittableRandomTest.java"/>
+        <exclude name="StampedLockTest.java"/>
+        <exclude name="SubmissionPublisherTest.java"/>
+        <compilerarg value="-Werror"/>
+      </javac-elements>
+    </run-tck-tests>
+  </target>
+
+  <!-- Runs tck tests for jsr166-4jdk7 via junit task (dead experiment) -->
+  <target name="4jdk7-tck-junit" depends="4jdk7compile">
+
+    <junit printsummary="true"
+           showoutput="true"
+           errorProperty="junit.failed"
+           failureProperty="junit.failed"
+           includeantruntime="true"
+           jvm="${java7}"
+           fork="true">
+
+      <jvmarg value="-Xbootclasspath/p:${4jdk7product.jar}"/>
+      <jvmarg value="-server"/>
+
+      <classpath>
+        <pathelement location="${junit.jar}"/>
+        <pathelement location="${build.4jdk7.tck.classes.dir}"/>
+      </classpath>
+
+      <formatter type="brief"/>
+
+      <test name="${jsr166.tckTestClass}" haltonfailure="no">
+      </test>
+    </junit>
+  </target>
+
+  <target name="4jdk7-jtreg" depends="4jdk7jar">
+    <run-jtreg-tests
+       target="7"
+       workdir="${build.4jdk7.dir}"
+       classes="${4jdk7product.jar}"/>
+  </target>
+
+  <target name="4jdk7-test" depends="4jdk7-tck, 4jdk7-jtreg"/>
+
+  <target name="4jdk7docs">
+    <delete dir="${4jdk7docs.dir}"/>
+    <mkdir dir="${4jdk7docs.dir}"/>
+
+    <javadoc destdir="${4jdk7docs.dir}"
+             packagenames="none"
+             link="${java7.api.url}"
+             overview="${4jdk7src.dir}/intro.html"
+             access="${build.javadoc.access}"
+             sourcepath="${4jdk7src.dir}:${jdk7.src.dir}"
+             classpath=""
+             executable="${javadoc7}"
+             failonerror = "true">
+      <fileset dir="${4jdk7src.dir}" defaultexcludes="yes">
+        <include name="**/*.java"/>
+      </fileset>
+      <arg line="-Xdocrootparent ${java7.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+    </javadoc>
+  </target>
+
+  <target name="4jdk7dist" depends="4jdk7dist-jar, 4jdk7dist-docs"/>
+
+  <target name="4jdk7clean">
+    <delete dir="${build.4jdk7.dir}"/>
+  </target>
+
+  <target name="4jdk7dist-jar" depends="4jdk7clean, 4jdk7jar">
+    <copy file="${4jdk7product.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="4jdk7dist-docs" depends="4jdk7clean, 4jdk7docs">
+    <mirror-dir src="${4jdk7docs.dir}" dst="${dist.4jdk7docs.dir}"/>
+  </target>
+
+
+  <!-- jsr166x (no longer maintained) -->
+
+  <target name="jsr166xcompile" depends="configure-compiler">
+    <mkdir dir="${build.jsr166x.classes.dir}"/>
+
+    <javac srcdir="${topsrc.dir}"
+           destdir="${build.jsr166x.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           classpath=""
+           bootclasspath="${bootclasspath6}"
+           source="5"
+           target="5"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac7}"
+           fork="true">
+      <include name="jsr166x/**/*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all,-unchecked,-rawtypes"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="jsr166xjar" depends="jsr166xcompile">
+    <jar destfile="${jsr166x.jar}">
+      <fileset dir="${build.jsr166x.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="jsr166xdocs">
+    <delete dir="${jsr166xdocs.dir}"/>
+    <mkdir dir="${jsr166xdocs.dir}"/>
+
+    <javadoc destdir="${jsr166xdocs.dir}"
+             packagenames="jsr166x.*"
+             link="${java.api.url}"
+             access="${build.javadoc.access}"
+             sourcepath="${topsrc.dir}:${jdk6.src.dir}"
+             bootclasspath="${bootclasspath6}"
+             source="5"
+             executable="${javadoc7}"
+             failonerror = "true">
+      <arg line="-Xdocrootparent ${java.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+    </javadoc>
+  </target>
+
+  <target name="jsr166xdist" depends="jsr166xdist-jar, jsr166xdist-docs"/>
+
+  <target name="jsr166xclean">
+    <delete dir="${build.jsr166x.dir}"/>
+  </target>
+
+  <target name="jsr166xdist-jar" depends="jsr166xclean, jsr166xjar">
+    <copy file="${jsr166x.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="jsr166xdist-docs" depends="jsr166xclean, jsr166xdocs">
+    <mirror-dir src="${jsr166xdocs.dir}" dst="${dist.jsr166xdocs.dir}"/>
+  </target>
+
+
+  <!-- jsr166y (no longer maintained) -->
+
+  <target name="jsr166ycompile" depends="configure-compiler">
+    <mkdir dir="${build.jsr166y.classes.dir}"/>
+
+    <javac srcdir="${topsrc.dir}"
+           destdir="${build.jsr166y.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="6"
+           target="6"
+           classpath=""
+           bootclasspath="${bootclasspath6}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac7}"
+           fork="true">
+
+      <include name="jsr166y/**/*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="jsr166yjar" depends="jsr166ycompile">
+    <jar destfile="${jsr166y.jar}" index="true">
+      <fileset dir="${build.jsr166y.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="jsr166ydocs">
+    <delete dir="${jsr166ydocs.dir}"/>
+    <mkdir dir="${jsr166ydocs.dir}"/>
+
+    <javadoc destdir="${jsr166ydocs.dir}"
+             packagenames="jsr166y.*"
+             link="${java.api.url}"
+             access="${build.javadoc.access}"
+             sourcepath="${topsrc.dir}:${jdk6.src.dir}"
+             bootclasspath="${bootclasspath6}"
+             source="6"
+             executable="${javadoc7}"
+             failonerror = "true">
+      <arg line="-Xdocrootparent ${java.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+    </javadoc>
+  </target>
+
+  <target name="jsr166ydist" depends="jsr166ydist-jar, jsr166ydist-docs"/>
+
+  <target name="jsr166yclean">
+    <delete dir="${build.jsr166y.dir}"/>
+  </target>
+
+  <target name="jsr166ydist-jar" depends="jsr166yclean, jsr166yjar">
+    <copy file="${jsr166y.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="jsr166ydist-docs" depends="jsr166yclean, jsr166ydocs">
+    <mirror-dir src="${jsr166ydocs.dir}" dst="${dist.jsr166ydocs.dir}"/>
+  </target>
+
+
+  <!-- extra166y (no longer maintained) -->
+
+  <target name="extra166ycompile" depends="configure-compiler, jsr166yjar">
+    <mkdir dir="${build.extra166y.classes.dir}"/>
+
+    <javac srcdir="${topsrc.dir}"
+           destdir="${build.extra166y.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           bootclasspath="@{jsr166y.jar}:${bootclasspath6}"
+           classpath=""
+           source="6"
+           target="6"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${javac7}"
+           fork="true">
+
+      <include name="extra166y/**/*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all,-unchecked,-rawtypes,-serial"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="extra166yjar" depends="extra166ycompile">
+    <jar destfile="${extra166y.jar}" index="true">
+      <fileset dir="${build.extra166y.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="extra166ydocs">
+    <delete dir="${extra166ydocs.dir}"/>
+    <mkdir dir="${extra166ydocs.dir}"/>
+
+    <javadoc destdir="${extra166ydocs.dir}"
+             packagenames="extra166y.*"
+             link="${java.api.url}"
+             access="${build.javadoc.access}"
+             sourcepath="${topsrc.dir}:${jdk6.src.dir}"
+             bootclasspath="${bootclasspath6}"
+             source="6"
+             executable="${javadoc7}">
+      <arg line="-Xdocrootparent ${java.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+    </javadoc>
+  </target>
+
+  <target name="extra166ydist" depends="extra166ydist-jar, extra166ydist-docs"/>
+
+  <target name="extra166yclean">
+    <delete dir="${build.extra166y.dir}"/>
+  </target>
+
+  <target name="extra166ydist-jar" depends="extra166yclean, extra166yjar">
+    <copy file="${extra166y.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="extra166ydist-docs" depends="extra166yclean, extra166ydocs">
+    <mirror-dir src="${extra166ydocs.dir}" dst="${dist.extra166ydocs.dir}"/>
+  </target>
+
+
+  <!-- jsr166e (no longer maintained) -->
+
+  <property name="build.jsr166e.java.version" value="6"/>
+  <property name="build.jsr166e.javac" value="${javac6}"/>
+
+  <target name="jsr166ecompile" depends="configure-compiler">
+    <mkdir dir="${build.jsr166e.classes.dir}"/>
+
+    <javac srcdir="${topsrc.dir}"
+           destdir="${build.jsr166e.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="${build.jsr166e.java.version}"
+           target="${build.jsr166e.java.version}"
+           classpath=""
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           executable="${build.jsr166e.javac}"
+           fork="true">
+
+      <include name="jsr166e/**/*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+  </target>
+
+  <target name="jsr166edoclint">
+    <mkdir dir="${build.jsr166e.classes.dir}"/>
+
+    <javac srcdir="${topsrc.dir}"
+           destdir="${build.jsr166e.classes.dir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           source="${build.jsr166e.java.version}"
+           target="${build.jsr166e.java.version}"
+           classpath=""
+           bootclasspath="${bootclasspath6}"
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           executable="${javac8}"
+           fork="true">
+
+      <include name="jsr166e/**/*.java"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Werror"/>
+      <compilerarg value="-Xdoclint:all/protected"/>
+    </javac>
+  </target>
+
+  <target name="jsr166ejar" depends="jsr166ecompile">
+    <jar destfile="${jsr166e.jar}" index="true">
+      <fileset dir="${build.jsr166e.classes.dir}"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+        <attribute name="Implementation-Vendor" value="JCP JSR-166 Expert Group."/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="jsr166edocs">
+    <delete dir="${jsr166edocs.dir}"/>
+    <mkdir dir="${jsr166edocs.dir}"/>
+
+    <javadoc destdir="${jsr166edocs.dir}"
+             packagenames="jsr166e.*"
+             link="${java.api.url}"
+             access="${build.javadoc.access}"
+             sourcepath="${topsrc.dir}:${jdk6.src.dir}"
+             source="${build.jsr166e.java.version}"
+             executable="${javadoc7}"
+             failonerror = "true">
+      <arg line="-Xdocrootparent ${java.docroot.url}"/>
+      <arg value="-XDignore.symbol.file=true"/>
+    </javadoc>
+  </target>
+
+  <target name="jsr166e-tck-one-java-version" depends="jsr166ejar">
+    <echo message="Testing with jdk${build.jsr166e.java.version} ..."/>
+    <run-tck-tests
+      tck.src.dir="${test.src.dir}/tck-jsr166e"
+      target="${build.jsr166e.java.version}"
+      workdir="${build.jsr166e.dir}"
+      classes="${jsr166e.jar}"/>
+  </target>
+
+  <target name="jsr166e-tck">
+
+<!--     <antcall target="clean"/> -->
+<!--     <antcall target="jsr166e-tck-one-java-version"> -->
+<!--       <param name="build.jsr166e.java.version" value="8"/> -->
+<!--       <param name="build.jsr166e.javac" value="${javac8}"/> -->
+<!--     </antcall> -->
+
+    <antcall target="clean"/>
+    <antcall target="jsr166e-tck-one-java-version">
+      <param name="build.jsr166e.java.version" value="7"/>
+      <param name="build.jsr166e.javac" value="${javac7}"/>
+    </antcall>
+
+    <antcall target="clean"/>
+    <antcall target="jsr166e-tck-one-java-version">
+      <param name="build.jsr166e.java.version" value="6"/>
+      <param name="build.jsr166e.javac" value="${javac6}"/>
+    </antcall>
+  </target>
+
+  <target name="jsr166e-test" depends="jsr166e-tck"/>
+
+  <target name="jsr166edist" depends="jsr166edist-jar, jsr166edist-docs"/>
+
+  <target name="jsr166eclean">
+    <delete dir="${build.jsr166e.dir}"/>
+  </target>
+
+  <target name="jsr166edist-jar"
+          depends="jsr166eclean, jsr166ejar">
+    <copy file="${jsr166e.jar}" todir="${dist.dir}"/>
+  </target>
+
+  <target name="jsr166edist-docs" depends="jsr166eclean, jsr166edocs">
+    <mirror-dir src="${jsr166edocs.dir}" dst="${dist.jsr166edocs.dir}"/>
+  </target>
+
+
+<!-- Find buglets that can be detected by static build tools -->
+
+<!--   <target name="lint"> -->
+<!--     <antcall target="dists"> -->
+<!--       <param name="build.javadoc.access" value="protected"/> -->
+<!--     </antcall> -->
+<!--   </target> -->
+
+<!-- Generates all doclint warnings, even for private methods (rarely useful) -->
+  <target name="doclint-private">
+    <antcall target="dist">
+      <param name="build.javadoc.access" value="private"/>
+    </antcall>
+  </target>
+
+
+<!-- ==============================================================
+  Experimental errorprone support - http://errorprone.info
+=================================================================== -->
+  <property name="errorprone.jar" location="${lib.dir}/error_prone_ant-2.3.1.jar"/>
+  <property name="errorprone.jsr166.user.flags" value=""/>
+  <property name="errorprone.jsr166.flags"
+            value="-Xep:HashtableContains:OFF
+                   -Xep:JdkObsolete:OFF
+                   -Xep:MissingOverride:OFF
+                   -Xep:MissingFail:OFF
+                   -Xep:MixedArrayDimensions:ERROR
+                   -Xep:RemoveUnusedImports:ERROR
+                   -Xep:EmptyIf:ERROR
+                   -Xep:MultipleTopLevelClasses:ERROR
+                   -Xep:ClassName:ERROR
+                   -Xep:LongLiteralLowerCaseSuffix:ERROR
+                   -Xep:RedundantThrows:ERROR
+                   -Xep:IdentityBinaryExpression:WARN
+                   -Xep:MethodCanBeStatic:WARN
+                   ${errorprone.jsr166.user.flags}"/>
+  <!-- -Xep:WildcardImport:ERROR -->
+  <property name="errorprone.jsr166.test.flags"
+            value="-Xep:StringSplitter:OFF
+                   -Xep:BoxedPrimitiveConstructor:OFF
+                   -Xep:ModifyingCollectionWithItself:OFF"/>
+  <!-- ant -emacs errorprone |& grep -EA1 '(warning|error):|warnings' -->
+  <target name="errorprone"
+          depends="clean, configure-compiler"
+          description="Run errorprone over jsr166 source code (experimental)">
+
+    <local name="destdir"/>
+    <property name="destdir" value="${build.classes.dir}/java.base"/>
+    <mkdir dir="${destdir}"/>
+
+    <javac srcdir="${src.dir}"
+           destdir="${destdir}"
+           debug="${build.debug}"
+           debuglevel="${build.debuglevel}"
+           deprecation="${build.deprecation}"
+           classpath=""
+           includeAntRuntime="false"
+           includeJavaRuntime="false"
+           encoding="ASCII"
+           executable="${build.main.javac}"
+           fork="true">
+
+      <include name="**/*.java"/>
+      <!-- Needed to silence -Xep:FutureReturnValueIgnored -->
+      <compilerarg value="-J--illegal-access=permit"/>
+      <compilerarg value="-XDcompilePolicy=simple"/>
+      <compilerarg line="-processorpath ${errorprone.jar}"/>
+      <compilerarg value="-Xplugin:ErrorProne
+                          ${errorprone.jsr166.flags}"/>
+      <compilerarg value="--patch-module=java.base=${src.dir}"/>
+      <compilerarg value="-Xprefer:source"/>
+      <compilerarg value="-XDignore.symbol.file=true"/>
+      <compilerarg value="-Xlint:all"/>
+      <compilerarg value="-Xdoclint:all/protected,reference/private"/>
+      <compilerarg line="-Xmaxerrs 3000 -Xmaxwarns 3000"/>
+      <compilerarg line="${build.args}"/>
+    </javac>
+
+    <jar destfile="${product.jar}">
+      <fileset dir="${destdir}"/>
+    </jar>
+
+    <run-tck-tests
+      target="${build.main.java.version}"
+      workdir="${build.dir}"
+      classes="${product.jar}">
+      <javac-elements>
+        <!-- Needed to silence -Xep:FutureReturnValueIgnored -->
+        <compilerarg value="-J--illegal-access=permit"/>
+        <compilerarg value="-XDcompilePolicy=simple"/>
+        <compilerarg line="-processorpath ${errorprone.jar}"/>
+        <compilerarg value="-Xplugin:ErrorProne
+                            ${errorprone.jsr166.flags}
+                            ${errorprone.jsr166.test.flags}"/>
+        <compilerarg line="-Xmaxerrs 3000 -Xmaxwarns 3000"/>
+      </javac-elements>
+    </run-tck-tests>
+  </target>
+
+  <!-- ant -emacs errorprone-jtreg |& grep -EA1 '(warning|error):' -->
+  <!-- -XDcompilePolicy=simple or byfile avoids confusing UnusedImports -->
+  <target name="errorprone-jtreg"
+          depends="jar"
+          description="Run errorprone over jtreg tests (experimental)">
+
+    <run-jtreg-tests
+       target="${build.main.java.version}"
+       workdir="${build.dir}"
+       classes="${product.jar}"
+       verbose="all">
+      <jtreg-elements>
+        <arg value="-javacoption:-XDcompilePolicy=simple"/>
+        <arg value="-javacoption:-processorpath"/>
+        <arg value="-javacoption:${errorprone.jar}"/>
+        <arg value="-javacoption:-Xplugin:ErrorProne
+                            ${errorprone.jsr166.flags}
+                            ${errorprone.jsr166.test.flags}
+                            -Xep:MultipleTopLevelClasses:WARN
+                            -Xep:NonAtomicVolatileUpdate:OFF"/>
+      </jtreg-elements>
+    </run-jtreg-tests>
+  </target>
+
+
+<!-- ==============================================================
+  Running guava tests against jsr166 code
+=================================================================== -->
+
+<!-- <ivy:cachepath pathid="lib.path.id" inline="true" conf="*" -->
+<!--   organisation="com.google.guava" module="guava-testlib" revision="21.0"/> -->
+<!-- <property name="guava.version" value="21.0"/> -->
+
+<!-- HOWTO debug print a path id -->
+<!-- <pathconvert property="guava.testlib.classpath" refid="guava.testlib.classpath" /> -->
+<!-- <echo message="guava.testlib.classpath=${guava.testlib.classpath}"/> -->
+
+<!-- <ivy:retrieve pathid="guava.tests.classpath" type="jar" inline="true" conf="*" pattern="${lib.dir}/[type]/[artifact].[ext]" -->
+<!--   organisation="com.google.guava" module="guava-tests"/> -->
+<!-- <get src="http://repo2.maven.org/maven2/com/google/guava/guava-tests/${guava.version}/guava-tests-${guava.version}-tests.jar" -->
+<!--   dest="${lib.dir}/jar/guava-tests-tests.jar" usetimestamp="true"/> -->
+<!--     <ivy:cachepath pathid="lib.path.id" inline="true" conf="*" type="*" -->
+<!--       organisation="com.google.guava" module="guava-testlib" revision="${guava.version}"/> -->
+
+<!-- <test name="com.google.common.collect.testing.TestsForQueuesInJavaUtil"/> -->
+<!-- <test name="com.google.common.collect.testing.TestsForListsInJavaUtil"/> -->
+<!-- <test name="com.google.common.collect.testing.TestsForSetsInJavaUtil"/> -->
+<!-- <test name="com.google.common.collect.testing.TestsForMapsInJavaUtil"/> -->
+
+<!-- <ivy:retrieve pathid="guava.testlib.classpath" -->
+<!--   type="*" inline="true" conf="*(private),*(public)" -->
+<!--   pattern="${guava.dir}/[artifact].[ext]" -->
+<!--   organisation="com.google.guava" module="guava-testlib"/> -->
+
+<!-- Work around bug below by downloading guava-testlib-tests.jar "by hand": -->
+<!-- https://issues.apache.org/jira/browse/IVY-1444 -->
+<!-- maven tests artifacts cannot be downloaded because they are mapped to private configurations -->
+
+  <target name="init-ivy">
+    <get src="http://repo2.maven.org/maven2/org/apache/ivy/ivy/2.4.0/ivy-2.4.0.jar"
+         dest="${build.dir}/ivy.jar" usetimestamp="true" skipexisting="true"/>
+    <taskdef resource="org/apache/ivy/ant/antlib.xml" uri="antlib:org.apache.ivy.ant"
+             classpath="${build.dir}/ivy.jar"/>
+  </target>
+
+  <target name="guava-tests" depends="jar, init-ivy"
+          description="Guava tests run against jsr166 collections">
+    <property name="guava.dir" value="${build.dir}/guava-testlib"/>
+    <mkdir dir="${guava.dir}"/>
+    <ivy:retrieve pathid="guava.testlib.classpath"
+      type="jar,bundle" inline="true" conf="default,master"
+      pattern="${guava.dir}/[artifact].[ext]"
+      organisation="com.google.guava" module="guava-testlib"/>
+    <property name="guava.version" value="21.0"/>
+    <get src="http://repo2.maven.org/maven2/com/google/guava/guava-testlib/${guava.version}/guava-testlib-${guava.version}-tests.jar"
+         dest="${guava.dir}/guava-testlib-tests.jar" usetimestamp="true"/>
+    <junit printsummary="true" showoutput="true" haltonfailure="true"
+           jvm="${build.main.java}" fork="true">
+      <jvmarg line="-ea -esa --patch-module=java.base=${product.jar}"/>
+      <formatter type="brief"/>
+      <classpath>
+        <pathelement location="${guava.dir}/guava-testlib-tests.jar"/>
+        <path refid="guava.testlib.classpath"/>
+      </classpath>
+
+      <!-- "6" in "OpenJdk6Tests" misleadingly means "6+" -->
+      <test name="com.google.common.collect.testing.OpenJdk6Tests"/>
+    </junit>
+  </target>
+
+</project>
